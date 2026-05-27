@@ -33,7 +33,7 @@
         <button onclick="switchTab('audit-tab')" id="btn-audit-tab" class="px-4 py-2 rounded-lg hover:bg-indigo-800 text-indigo-200 hover:text-white font-medium transition cursor-pointer">
           <i class="fa-solid fa-chart-line mr-2"></i>KPI Variance Audit
         </button>
-        <button id="installPwaBtn" class="hidden px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition cursor-pointer shadow">
+        <button id="installPwaBtn" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium transition cursor-pointer shadow">
           <i class="fa-solid fa-download mr-2"></i>Install App
         </button>
       </div>
@@ -208,44 +208,80 @@
 
     let deferredPwaPrompt = null;
 
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', async () => {
-        try {
-          await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-          console.log('IUL Eval service worker registered.');
-        } catch (error) {
-          console.warn('Service worker registration failed:', error);
-        }
-      });
+    function isIosDevice() {
+      return /iphone|ipad|ipod/i.test(window.navigator.userAgent);
     }
+
+    function isInStandaloneMode() {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    }
+
+    async function registerIulServiceWorker() {
+      if (!('serviceWorker' in navigator)) {
+        console.warn('Service workers are not supported in this browser.');
+        return;
+      }
+
+      try {
+        const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        console.log('IUL Eval service worker registered:', registration.scope);
+      } catch (error) {
+        console.warn('Service worker registration failed:', error);
+      }
+    }
+
+    window.addEventListener('load', registerIulServiceWorker);
 
     window.addEventListener('beforeinstallprompt', (event) => {
       event.preventDefault();
       deferredPwaPrompt = event;
+
       const installButton = document.getElementById('installPwaBtn');
-      if (installButton) installButton.classList.remove('hidden');
+      if (installButton) {
+        installButton.classList.remove('hidden');
+        installButton.disabled = false;
+        installButton.innerHTML = '<i class="fa-solid fa-download mr-2"></i>Install App';
+      }
     });
 
     window.addEventListener('appinstalled', () => {
       deferredPwaPrompt = null;
+
       const installButton = document.getElementById('installPwaBtn');
-      if (installButton) installButton.classList.add('hidden');
+      if (installButton) {
+        installButton.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Installed';
+        installButton.disabled = true;
+        installButton.classList.add('opacity-70', 'cursor-not-allowed');
+      }
     });
 
     document.addEventListener('DOMContentLoaded', () => {
       const installButton = document.getElementById('installPwaBtn');
       if (!installButton) return;
 
+      installButton.classList.remove('hidden');
+
+      if (isInStandaloneMode()) {
+        installButton.innerHTML = '<i class="fa-solid fa-check mr-2"></i>Installed';
+        installButton.disabled = true;
+        installButton.classList.add('opacity-70', 'cursor-not-allowed');
+        return;
+      }
+
       installButton.addEventListener('click', async () => {
-        if (!deferredPwaPrompt) {
-          alert('Use your browser menu and choose Install App or Add to Home Screen. On iPhone/iPad: Share → Add to Home Screen.');
+        if (deferredPwaPrompt) {
+          deferredPwaPrompt.prompt();
+          await deferredPwaPrompt.userChoice;
+          deferredPwaPrompt = null;
           return;
         }
 
-        deferredPwaPrompt.prompt();
-        await deferredPwaPrompt.userChoice;
-        deferredPwaPrompt = null;
-        installButton.classList.add('hidden');
+        if (isIosDevice()) {
+          alert('On iPhone/iPad: open this site in Safari, tap Share, then choose Add to Home Screen.');
+          return;
+        }
+
+        alert('Open your browser menu and choose Install App or Add to Home Screen. If that option is missing, verify that /manifest.webmanifest, /sw.js, and both icon files open correctly.');
       });
     });
 
