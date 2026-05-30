@@ -667,45 +667,197 @@
     function renderCompletionPie(executed, pending) {
       const ctx = document.getElementById('completionPieChart').getContext('2d');
       if (activeCompletionChartInstance) activeCompletionChartInstance.destroy();
+
+      const percentageLabelPlugin = {
+        id: 'percentageLabelPlugin',
+        afterDatasetsDraw(chart) {
+          const { ctx } = chart;
+          const dataset = chart.data.datasets[0];
+          const total = dataset.data.reduce((sum, value) => sum + Number(value || 0), 0);
+          if (!total) return;
+
+          ctx.save();
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.font = 'bold 14px sans-serif';
+          ctx.fillStyle = '#ffffff';
+          ctx.strokeStyle = 'rgba(15, 23, 42, 0.55)';
+          ctx.lineWidth = 3;
+
+          chart.getDatasetMeta(0).data.forEach((arc, index) => {
+            const value = Number(dataset.data[index] || 0);
+            if (!value) return;
+
+            const percentage = Math.round((value / total) * 100);
+            const { x, y } = arc.tooltipPosition();
+            const label = `${percentage}%`;
+            ctx.strokeText(label, x, y);
+            ctx.fillText(label, x, y);
+          });
+
+          ctx.restore();
+        }
+      };
+
       activeCompletionChartInstance = new Chart(ctx, {
         type: 'pie',
         data: { labels: ['Executed', 'Still not executed'], datasets: [{ data: [executed, pending], backgroundColor: ['rgba(16, 185, 129, 0.78)', 'rgba(245, 158, 11, 0.78)'], borderColor: ['rgb(16, 185, 129)', 'rgb(245, 158, 11)'], borderWidth: 1.5 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: ctx => { const total = executed + pending; const pct = total ? Math.round((ctx.raw / total) * 100) : 0; return `${ctx.label}: ${ctx.raw} (${pct}%)`; } } } } }
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' }, tooltip: { callbacks: { label: ctx => { const total = executed + pending; const pct = total ? Math.round((ctx.raw / total) * 100) : 0; return `${ctx.label}: ${ctx.raw} (${pct}%)`; } } } } },
+        plugins: [percentageLabelPlugin]
       });
     }
 
     function renderPendingEvaluations() {
       const container = document.getElementById('pendingEvaluationList');
       container.innerHTML = '';
+      container.className = 'space-y-4 mt-4';
+
       if (!filteredPendingEvaluations.length) {
-        container.innerHTML = '<div class="md:col-span-2 text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-xl p-4">No pending evaluations found for the selected filter.</div>';
+        container.innerHTML = '<div class="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-xl p-4">No pending evaluations found for the selected filter.</div>';
         return;
       }
-      filteredPendingEvaluations.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'p-3 rounded-xl bg-amber-50 border border-amber-100 text-sm';
-        div.innerHTML = `<div class="font-bold text-amber-900">${escapeHtml(item.professorName)}</div><div class="text-amber-700 text-xs mt-0.5">ID: ${escapeHtml(item.professorId || '-')} • Supervisor: ${escapeHtml(item.supervisorId || 'Unknown')} • ${escapeHtml(item.academicYear || '')} ${escapeHtml(item.academicQuarter || '')}</div><div class="text-amber-600 text-xs mt-1">${escapeHtml(item.achievementKey || '')}</div>`;
-        container.appendChild(div);
-      });
+
+      const supervisorPalette = [
+        { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', accent: 'bg-amber-500', badge: 'bg-amber-100 text-amber-900 border-amber-200' },
+        { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-900', accent: 'bg-blue-500', badge: 'bg-blue-100 text-blue-900 border-blue-200' },
+        { bg: 'bg-emerald-50', border: 'border-emerald-300', text: 'text-emerald-900', accent: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-900 border-emerald-200' },
+        { bg: 'bg-fuchsia-50', border: 'border-fuchsia-300', text: 'text-fuchsia-900', accent: 'bg-fuchsia-500', badge: 'bg-fuchsia-100 text-fuchsia-900 border-fuchsia-200' },
+        { bg: 'bg-violet-50', border: 'border-violet-300', text: 'text-violet-900', accent: 'bg-violet-500', badge: 'bg-violet-100 text-violet-900 border-violet-200' },
+        { bg: 'bg-cyan-50', border: 'border-cyan-300', text: 'text-cyan-900', accent: 'bg-cyan-500', badge: 'bg-cyan-100 text-cyan-900 border-cyan-200' },
+        { bg: 'bg-orange-50', border: 'border-orange-300', text: 'text-orange-900', accent: 'bg-orange-500', badge: 'bg-orange-100 text-orange-900 border-orange-200' },
+        { bg: 'bg-indigo-50', border: 'border-indigo-300', text: 'text-indigo-900', accent: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-900 border-indigo-200' }
+      ];
+
+      const groupedBySupervisor = filteredPendingEvaluations.reduce((groups, item) => {
+        const supervisorId = String(item.supervisorId || 'Unknown').trim() || 'Unknown';
+        if (!groups[supervisorId]) groups[supervisorId] = [];
+        groups[supervisorId].push(item);
+        return groups;
+      }, {});
+
+      Object.entries(groupedBySupervisor)
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+        .forEach(([supervisorId, items], index) => {
+          const color = supervisorPalette[index % supervisorPalette.length];
+          const sortedItems = [...items].sort((a, b) => String(a.professorName || '').localeCompare(String(b.professorName || ''), undefined, { numeric: true }));
+          const section = document.createElement('section');
+          section.className = `overflow-hidden rounded-2xl border ${color.border} ${color.bg} shadow-sm`;
+          section.innerHTML = `
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border-b ${color.border} bg-white/55">
+              <div class="flex items-center gap-3">
+                <span class="h-10 w-2 rounded-full ${color.accent}"></span>
+                <div>
+                  <div class="text-xs font-black uppercase tracking-wider ${color.text}">Pending Evaluation Queue Cluster</div>
+                  <h4 class="text-lg font-black ${color.text}">Supervisor ${escapeHtml(supervisorId)}</h4>
+                </div>
+              </div>
+              <span class="self-start sm:self-auto px-3 py-1 rounded-full border text-xs font-black ${color.badge}">
+                ${sortedItems.length} pending evaluation${sortedItems.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
+              ${sortedItems.map(item => `
+                <article class="p-3 rounded-xl bg-white/90 border ${color.border} text-sm shadow-sm">
+                  <div class="font-bold ${color.text}">${escapeHtml(item.professorName)}</div>
+                  <div class="text-slate-600 text-xs mt-0.5">Professor ID: ${escapeHtml(item.professorId || '-')} • Supervisor: ${escapeHtml(supervisorId)} • ${escapeHtml(item.academicYear || '')} ${escapeHtml(item.academicQuarter || '')}</div>
+                  <div class="text-slate-500 text-xs mt-1">${escapeHtml(item.achievementKey || '')}</div>
+                </article>
+              `).join('')}
+            </div>`;
+          container.appendChild(section);
+        });
     }
 
     function renderProfessorList(records) {
       const container = document.getElementById('professor-list');
       container.innerHTML = '';
+      container.className = 'space-y-4 overflow-y-auto max-h-[520px] pr-1';
+
       if (!records.length) {
         container.innerHTML = '<div class="text-sm text-slate-500 bg-slate-50 border border-slate-100 rounded-xl p-4">No executed professor records match the selected filters.</div>';
         clearSelectedRecord();
         return;
       }
-      records.forEach((record, index) => {
-        const button = document.createElement('button');
-        const summary = record.discrepancySummary || { green: 0, orange: 0, red: 0 };
-        button.className = `w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer ${index === 0 ? 'bg-indigo-50 text-indigo-900 font-bold border border-indigo-100' : 'hover:bg-slate-100 text-slate-700'}`;
-        button.onclick = () => selectProfessorRecord(record, button);
-        button.innerHTML = `<div class="truncate mr-2"><div class="truncate text-sm font-medium group-hover:text-indigo-900">${escapeHtml(record.professorName)}</div><div class="text-xs text-slate-400 font-normal mt-0.5">ID: ${escapeHtml(record.professorId)} • Supervisor: ${escapeHtml(record.supervisorId)} • ${escapeHtml(record.academicYear)} ${escapeHtml(record.academicQuarter)}</div></div><div class="flex gap-1 shrink-0">${buildCompactBadges(summary)}</div>`;
-        container.appendChild(button);
-      });
-      selectProfessorRecord(records[0], container.firstChild);
+
+      const supervisorPalette = [
+        { bg: 'bg-amber-50', border: 'border-amber-300', text: 'text-amber-900', accent: 'bg-amber-500', badge: 'bg-amber-100 text-amber-900 border-amber-200', hover: 'hover:bg-amber-100' },
+        { bg: 'bg-blue-50', border: 'border-blue-300', text: 'text-blue-900', accent: 'bg-blue-500', badge: 'bg-blue-100 text-blue-900 border-blue-200', hover: 'hover:bg-blue-100' },
+        { bg: 'bg-emerald-50', border: 'border-emerald-300', text: 'text-emerald-900', accent: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-900 border-emerald-200', hover: 'hover:bg-emerald-100' },
+        { bg: 'bg-fuchsia-50', border: 'border-fuchsia-300', text: 'text-fuchsia-900', accent: 'bg-fuchsia-500', badge: 'bg-fuchsia-100 text-fuchsia-900 border-fuchsia-200', hover: 'hover:bg-fuchsia-100' },
+        { bg: 'bg-violet-50', border: 'border-violet-300', text: 'text-violet-900', accent: 'bg-violet-500', badge: 'bg-violet-100 text-violet-900 border-violet-200', hover: 'hover:bg-violet-100' },
+        { bg: 'bg-cyan-50', border: 'border-cyan-300', text: 'text-cyan-900', accent: 'bg-cyan-500', badge: 'bg-cyan-100 text-cyan-900 border-cyan-200', hover: 'hover:bg-cyan-100' },
+        { bg: 'bg-orange-50', border: 'border-orange-300', text: 'text-orange-900', accent: 'bg-orange-500', badge: 'bg-orange-100 text-orange-900 border-orange-200', hover: 'hover:bg-orange-100' },
+        { bg: 'bg-indigo-50', border: 'border-indigo-300', text: 'text-indigo-900', accent: 'bg-indigo-500', badge: 'bg-indigo-100 text-indigo-900 border-indigo-200', hover: 'hover:bg-indigo-100' }
+      ];
+
+      const groupedBySupervisor = records.reduce((groups, record) => {
+        const supervisorId = String(record.supervisorId || 'Unknown').trim() || 'Unknown';
+        if (!groups[supervisorId]) groups[supervisorId] = [];
+        groups[supervisorId].push(record);
+        return groups;
+      }, {});
+
+      let firstButton = null;
+      let firstRecord = null;
+
+      Object.entries(groupedBySupervisor)
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+        .forEach(([supervisorId, supervisorRecords], index) => {
+          const color = supervisorPalette[index % supervisorPalette.length];
+          const sortedRecords = [...supervisorRecords].sort((a, b) => String(a.professorName || '').localeCompare(String(b.professorName || ''), undefined, { numeric: true }));
+          const totals = sortedRecords.reduce((acc, record) => {
+            const s = record.discrepancySummary || {};
+            acc.green += Number(s.green || 0);
+            acc.orange += Number(s.orange || 0);
+            acc.red += Number(s.red || 0);
+            acc.total += Number(s.totalDiscrepancies || 0);
+            return acc;
+          }, { green: 0, orange: 0, red: 0, total: 0 });
+
+          const section = document.createElement('section');
+          section.className = `overflow-hidden rounded-2xl border ${color.border} ${color.bg} shadow-sm`;
+          section.innerHTML = `
+            <div class="flex flex-col gap-3 p-3 border-b ${color.border} bg-white/55">
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                  <span class="h-10 w-2 rounded-full ${color.accent}"></span>
+                  <div>
+                    <div class="text-[10px] font-black uppercase tracking-wider ${color.text}">Audited Faculty Records Cluster</div>
+                    <h4 class="text-sm font-black ${color.text}">Supervisor ${escapeHtml(supervisorId)}</h4>
+                  </div>
+                </div>
+                <span class="shrink-0 px-2.5 py-1 rounded-full border text-[10px] font-black ${color.badge}">
+                  ${sortedRecords.length} audited
+                </span>
+              </div>
+              <div class="flex flex-wrap gap-1.5 pl-5">
+                ${totals.red ? `<span class="bg-rose-100 text-rose-800 text-[10px] font-bold px-1.5 py-0.5 rounded">${totals.red}R</span>` : ''}
+                ${totals.orange ? `<span class="bg-orange-100 text-orange-800 text-[10px] font-bold px-1.5 py-0.5 rounded">${totals.orange}O</span>` : ''}
+                ${totals.green ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded">${totals.green}G</span>` : ''}
+                ${!totals.total ? '<span class="bg-slate-100 text-slate-700 text-[10px] font-bold px-1.5 py-0.5 rounded">Clean</span>' : ''}
+              </div>
+            </div>`;
+
+          const list = document.createElement('div');
+          list.className = 'space-y-1 p-2';
+          sortedRecords.forEach(record => {
+            const button = document.createElement('button');
+            const summary = record.discrepancySummary || { green: 0, orange: 0, red: 0 };
+            const defaultClass = `audited-record-btn w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer bg-white/70 ${color.hover} text-slate-700 border border-transparent`;
+            const selectedClass = 'audited-record-btn w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer bg-indigo-50 text-indigo-900 font-bold border border-indigo-200 shadow-sm';
+            button.className = defaultClass;
+            button.dataset.defaultClass = defaultClass;
+            button.dataset.selectedClass = selectedClass;
+            button.onclick = () => selectProfessorRecord(record, button);
+            button.innerHTML = `<div class="truncate mr-2"><div class="truncate text-sm font-medium group-hover:text-indigo-900">${escapeHtml(record.professorName)}</div><div class="text-xs text-slate-400 font-normal mt-0.5">ID: ${escapeHtml(record.professorId)} • ${escapeHtml(record.academicYear)} ${escapeHtml(record.academicQuarter)}</div></div><div class="flex gap-1 shrink-0">${buildCompactBadges(summary)}</div>`;
+            list.appendChild(button);
+            if (!firstButton) { firstButton = button; firstRecord = record; }
+          });
+          section.appendChild(list);
+          container.appendChild(section);
+        });
+
+      if (firstRecord && firstButton) selectProfessorRecord(firstRecord, firstButton);
     }
 
     function buildCompactBadges(summary) {
@@ -718,8 +870,12 @@
     }
 
     function selectProfessorRecord(record, element) {
-      document.querySelectorAll('#professor-list button').forEach(btn => { btn.className = 'w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer hover:bg-slate-100 text-slate-700'; });
-      if (element) element.className = 'w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer bg-indigo-50 text-indigo-900 font-bold border border-indigo-100';
+      document.querySelectorAll('#professor-list .audited-record-btn').forEach(btn => {
+        btn.className = btn.dataset.defaultClass || 'audited-record-btn w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer hover:bg-slate-100 text-slate-700 border border-transparent';
+      });
+      if (element) {
+        element.className = element.dataset.selectedClass || 'audited-record-btn w-full text-left p-3 rounded-xl transition flex justify-between items-center group cursor-pointer bg-indigo-50 text-indigo-900 font-bold border border-indigo-100';
+      }
       document.getElementById('chart-title').textContent = `${record.professorName} — Performance KPI Alignment Vector`;
       populateAuditTable(record);
       renderChartVisualizer(record);
